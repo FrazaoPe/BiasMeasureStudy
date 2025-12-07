@@ -1,0 +1,639 @@
+---
+title: "PM 2.5 no estado de Pernambuco: Um estudo de viés entre duas fontes de medição"
+
+author:
+  - name: Pedro Frazão Dutra
+    affiliation: "Universidade Federal Fluminense"
+    address: "pefrazao@id.uff.br"
+
+output:
+  distill::distill_article:
+    toc: true
+    toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning=FALSE)
+
+Sys.setlocale(category = "LC_ALL", locale = "pt_BR.UTF-8")
+```
+
+```{r pacotes}
+library(tidyverse)
+library(readxl)
+library(geobr)
+library(sf)
+library(tmap)
+library(plotly)
+library(distill)
+```
+
+```{r leitura-dados}
+dadosCamsMensal <- read.csv("BaseCamsMensal.csv")
+dadosCamsAnual <- read.csv("BaseCamsAnual.csv")
+dadosDon <- read.csv2("BaseDonkelar.csv")
+dadosDonAnual <- read.csv2("BaseDonkelarAnual.csv")
+```
+
+## Introdução
+
+O presente estudo tem como objetivo principal avaliar a discrepância e o viés entre duas fontes de estimativas de material particulado fino (PM2.5) – o sensoriamento remoto do CAMS e o de Donkelar – no estado de Pernambuco. Para tal, será conduzida uma análise descritiva comparativa, abordando a distribuição espacial, a sazonalidade, o grau de associação e as dinâmicas temporal e espaço-temporal de ambas as fontes de dados. Adicionalmente, será investigada a distribuição das diferenças (viés) entre as medições. O escopo temporal da análise compreende os anos de 2022 e 2023.
+
+## 1. Análise geográfica da concentração de PM 2.5
+
+Para a visualização da distribuição espacial do PM 2.5, foi realizada a junção dos dados de emissão média anual de material particulado fino com as bases de dados geoespaciais dos municípios de Pernambuco.
+
+### 1.1. Mapas da Fonte Donkelar e CAMS em 2022
+
+```{r mapas-cams}
+municipios_pe <- read_municipality(code_muni = "PE", year = 2024)
+
+dadosCamsAnual$Cod <- as.character(dadosCamsAnual$Cod)
+
+municipios_pe1 <- municipios_pe |>
+  mutate(Cod = as.character(code_muni))
+
+PE_Cams_Mapa22 <- left_join(municipios_pe1, dadosCamsAnual, by = "Cod") |>
+  filter(is.finite(PM25_Anual)) |>  filter(ano == "2022")
+
+mapa_pm25_Cams_2022 <- tm_shape(PE_Cams_Mapa22) +
+  tm_fill(
+    "PM25_Anual",
+    title = "PM2.5",
+    palette = c("#0048ff", "#808080", "#660708"),
+      style = "fixed",
+      breaks = c(0, 10, 20, 30),
+      labels = c("Bom (0–10]", "Ruim (10–20]", "Péssimo (20–30]"),
+    alpha = 0.7,
+    showNA = F,
+    popup.vars = c(
+      "Município" = "name_muni",
+      "Média Anual PM2.5" = "PM25_Anual"
+    ),
+    popup.format = list(PM25_Anual = list(digits = 2)),
+    id = "name_muni"
+  ) +
+  tm_borders(alpha = 0.6) +
+  tm_layout(
+    main.title = "Média Anual PM2.5",
+    main.title.position = "center",
+    title = "Fonte: CAMS (2022)",
+    title.size = 0.6,
+    title.position = c("center", "bottom"),
+    legend.title.size = 0.5,
+    legend.text.size = 0.5
+  )
+
+dadosDonAnual$CD_MUN <- as.character(dadosDonAnual$CD_MUN)
+
+municipios_pe2 <- municipios_pe |>
+  mutate(CD_MUN = as.character(code_muni))
+
+Mapa_Don_PE_22 <- left_join(municipios_pe2, dadosDonAnual, by = "CD_MUN") |>
+  filter(is.finite(PM25_Anual)) |> filter(Ano == "2022")
+
+mapa_pm25_Don_2022 <- tm_shape(Mapa_Don_PE_22) +
+  tm_fill(
+    "PM25_Anual",
+    title = "PM2.5",
+    n = 5,
+    palette = c("#0048ff", "#808080", "#660708"),
+      style = "fixed",
+      breaks = c(0, 10, 20, 30),
+      labels = c("Bom (0–10]", "Ruim (10–20]", "Péssimo (20–30]"),
+    alpha = 0.7,
+    showNA = F,
+    popup.vars = c(
+      "Município" = "name_muni",
+      "Média Anual PM2.5" = "PM25_Anual"
+    ),
+    popup.format = list(PM25_Anual = list(digits = 2)),
+    id = "name_muni"
+  ) +
+  tm_borders(alpha = 0.6) +
+  tm_layout(
+    main.title = "Média Anual PM2.5",
+    main.title.position = "center",
+    title = "Fonte: Donkelar (2022)",
+    title.size = 0.8,
+    title.position = c('center', 'bottom')
+  )
+
+tmap_mode("view")
+
+tmap_arrange(mapa_pm25_Don_2022,mapa_pm25_Cams_2022, nrow = 2)
+```
+
+Nota-se que, para o ano de 2022, em um subconjunto específico de municípios pernambucanos, as estimativas médias produzidas pelo CAMS apresentaram valores superiores aos do Donkelar, resultando em uma reclassificação da qualidade do ar (para um nível superior/pior) nestas localidades. Em um grupo mais restrito de municípios, as medições do CAMS foram inferiores às do Donkelar, chegando a diferir em duas ou mais categorias da escala de qualidade.
+
+### 1.2. Mapas da Fonte Donkelar e CAMS em 2023
+
+```{r}
+Mapa_Don_PE_23 <- left_join(municipios_pe2, dadosDonAnual, by = "CD_MUN") |>
+  filter(is.finite(PM25_Anual)) |> filter(Ano == "2023")
+
+mapa_pm25_Don_2023 <- tm_shape(Mapa_Don_PE_23) +
+  tm_fill(
+    "PM25_Anual",
+    title = "PM2.5",
+    n = 5,
+    palette = c("#0048ff", "#808080", "#660708"),
+      style = "fixed",
+      breaks = c(0, 10, 20, 30),
+      labels = c("Bom (0–10]", "Ruim (10–20]", "Péssimo (20–30]"),
+    alpha = 0.7,
+    showNA = F,
+    popup.vars = c(
+      "Município" = "name_muni",
+      "Média Anual PM2.5" = "PM25_Anual"
+    ),
+    popup.format = list(PM25_Anual = list(digits = 2)),
+    id = "name_muni"
+  ) +
+  tm_borders(alpha = 0.6) +
+  tm_layout(
+    main.title = "Média Anual de PM2.5",
+    main.title.position = "center",
+    title = "Fonte: Donkelar (2023)",
+    title.size = 0.8,
+    title.position = c('center', 'bottom')
+  )
+
+
+PE_Cams_Mapa23 <- left_join(municipios_pe1, dadosCamsAnual, by = "Cod") |>
+  filter(is.finite(PM25_Anual)) |>  filter(ano == "2023")
+
+mapa_pm25_Cams_2023 <- tm_shape(PE_Cams_Mapa23) +
+  tm_fill(
+    "PM25_Anual",
+    title = "PM2.5",
+    palette = c("#0048ff", "#808080", "#660708"),
+      style = "fixed",
+      breaks = c(0, 10, 20, 30),
+      labels = c("Bom (0–10]", "Ruim (10–20]", "Péssimo (20–30]"),
+    alpha = 0.7,
+    showNA = F,
+    popup.vars = c(
+      "Município" = "name_muni",
+      "Média Anual PM2.5" = "PM25_Anual"
+    ),
+    popup.format = list(PM25_Anual = list(digits = 2)),
+    id = "name_muni"
+  ) +
+  tm_borders(alpha = 0.6) +
+  tm_layout(
+    main.title = "Média Anual de PM2.5",
+    main.title.position = "center",
+    title = "Fonte: CAMS (2023)",
+    title.size = 0.6,
+    title.position = c("center", "bottom"),
+    legend.title.size = 0.5,
+    legend.text.size = 0.5
+  )
+
+tmap_mode("view")
+
+tmap_arrange(mapa_pm25_Don_2023,mapa_pm25_Cams_2023, nrow = 2)
+```
+
+Para o ano de 2023, observa-se uma inversão da tendência, onde as estimativas médias anuais da fonte Donkelar foram consistentemente maiores ou iguais às registradas pelo CAMS em todo o território. A discrepância máxima observada entre as fontes foi de duas categorias na escala de qualidade, registrada especificamente no município de Olinda.
+
+## 2. Mapas das diferenças
+
+A seção subsequente apresenta os mapas coropléticos que ilustram a diferença absoluta (viés) entre as estimativas médias anuais do CAMS e do Donkelar.
+
+```{r mapa-diferencas}
+dados_cams <- dadosCamsAnual |>
+  select(Cod, PM25_CAMS = PM25_Anual,ano)
+
+dados_don <- dadosDonAnual |>
+  select(CD_MUN, PM25_Don = PM25_Anual,Ano)
+
+dados_diferenca <- inner_join(
+  dados_cams,
+  dados_don,
+  by = c("Cod" = "CD_MUN", "ano" = "Ano")
+) |>
+  mutate(Diferenca_PM25 = PM25_CAMS - PM25_Don)
+
+PE_Diferencas_2022 <- municipios_pe |>
+  mutate(Cod = as.character(code_muni)) |>
+  left_join(dados_diferenca, by = "Cod") |>
+  filter(!is.na(Diferenca_PM25)) |>
+  filter(ano == "2022")
+
+PE_Diferencas_2023 <- municipios_pe |>
+  mutate(Cod = as.character(code_muni)) |>
+  left_join(dados_diferenca, by = "Cod") |>
+  filter(!is.na(Diferenca_PM25)) |>
+  filter(ano == "2023")
+
+breaks_4_cat <- c(-8, -4, 0, 4, 8)
+labels_4_cat <- c("-8 a -4", "-4 a 0", "0 a 4", "4 a 8")
+
+mapa_diferencas_2022 <- tm_shape(PE_Diferencas_2022) +
+  tm_fill(
+    "Diferenca_PM25",
+    title = "Diferença PM2.5",
+    palette = "BrBG",
+    style = "fixed", 
+    breaks = breaks_4_cat,  
+    labels = labels_4_cat,  
+    alpha = 0.8,
+    showNA = F,
+    popup.vars = c(
+      "Município" = "name_muni",
+      "PM2.5 CAMS" = "PM25_CAMS",
+      "PM2.5 Donkelar" = "PM25_Don",
+      "Diferença (CAMS - Donkelar)" = "Diferenca_PM25"
+    ),
+    popup.format = list(
+      PM25_CAMS = list(digits = 2),
+      PM25_Don = list(digits = 2),
+      Diferenca_PM25 = list(digits = 2)
+    ),
+    id = "name_muni"
+  ) +
+  tm_borders(alpha = 0.5) +
+  tm_layout(
+    main.title = "Diferença na Média Anual de PM2.5 (CAMS - Donkelar) (2022)",
+    main.title.position = "center"
+  )
+
+mapa_diferencas_2023 <- tm_shape(PE_Diferencas_2023) +
+  tm_fill(
+    "Diferenca_PM25",
+    title = "Diferença PM2.5",
+    palette = "BrBG",
+    style = "fixed", 
+    breaks = breaks_4_cat,  
+    labels = labels_4_cat, 
+    alpha = 0.8,
+    showNA = F,
+    popup.vars = c(
+      "Município" = "name_muni",
+      "PM2.5 CAMS" = "PM25_CAMS",
+      "PM2.5 Donkelar" = "PM25_Don",
+      "Diferença (CAMS - Donkelar)" = "Diferenca_PM25"
+    ),
+    popup.format = list(
+      PM25_CAMS = list(digits = 2),
+      PM25_Don = list(digits = 2),
+      Diferenca_PM25 = list(digits = 2)
+    ),
+    id = "name_muni"
+  ) +
+  tm_borders(alpha = 0.5) +
+  tm_layout(
+    main.title = "Diferença na Média Anual de PM2.5 (CAMS - Donkelar) (2023)",
+    main.title.position = "center"
+  )
+
+tmap_mode("view")
+
+tmap_arrange(mapa_diferencas_2022,mapa_diferencas_2023, nrow = 2)
+```
+
+A análise comparativa dos mapas de diferença para 2022 e 2023 indica que, em geral, a fonte Donkelar tende a produzir estimativas superiores às do CAMS. Isto é evidenciado pela predominância de áreas com valores de diferença negativos, que cobrem a maior parte do território estadual em ambos os anos.
+
+## 3. Análise da Sazonalidade
+
+A análise da sazonalidade das medições em nível estadual, realizada por meio de gráficos de violino e boxplot, sugere que ambas as fontes exibem um comportamento sazonal relativamente estável, com pouca variação intermensal. Contudo, é necessária cautela nesta interpretação, recomendando-se análises mais robustas, dada a notória presença de valores atípicos (outliers) na série de dados da fonte Donkelar.
+
+Um ponto de destaque é que, ao avaliar as distribuições mensais de forma agregada (incluindo todos os municípios), as medições do CAMS parecem ser, em mediana, superiores às do Donkelar. Esta observação, que pode ser aferida pela diferença nas escalas do eixo Y entre os gráficos das duas fontes, contrasta com a análise geográfica anual (Seção 2), que indicou uma tendência oposta. Isso sugere que a agregação temporal e espacial pode influenciar a direção do viés.
+
+### 3.1 Sazonalidade - Fonte CAMS
+
+```{r boxplot-cams, message=FALSE, warning=FALSE}
+ola1 <- dadosCamsMensal |>
+  filter(ano %in% c("2022", "2023")) |>
+  ggplot(aes(x = month, y = pm2.5Mensal, group = month)) +
+  geom_violin(alpha = 0.5, trim = FALSE, fill = "#faf0ca") +
+  geom_boxplot(width = 0.15, fill = "#0d3b66", alpha = 0.7) +
+  labs(
+    x = "Mês",
+    y = "PM2.5 (µg/m³)",
+    caption = "Fonte: CAMS"
+  ) +
+  scale_x_continuous(breaks = seq(1, 12, by = 2)) + 
+  scale_y_continuous(limits = c(0, 24)) +
+  theme_classic() +
+  facet_wrap(~ ano, ncol = 1) 
+
+ggplotly(ola1)
+```
+
+### 3.2. Sazonalidade - Fonte Donkelar
+
+```{r boxplot-donkelar}
+dados_filtrados <- dadosDon |> 
+  filter(Ano %in% c("2022", "2023"))
+
+ola2 <- dados_filtrados |>
+  ggplot(aes(x = Mes, y = Media_PM25, group = Mes)) +
+  geom_violin(alpha = 0.5, trim = FALSE, fill = "#faf0ca") +
+  geom_boxplot(width = 0.15, fill = "#0d3b66", alpha = 0.7) +
+  labs(
+    x = "Mês", 
+    y = "PM2.5 (µg/m³)",
+    caption = "Fonte: Donkelar (2022-2023)"
+  ) +
+  scale_x_continuous(breaks = seq(1, 12, by = 2)) +
+  scale_y_continuous(limits = c(3, 15)) +
+  theme_classic() +
+  facet_wrap(~ Ano, ncol = 1)
+
+ggplotly(ola2)
+```
+
+## 4. Tabelas Resumo
+
+As tabelas subsequentes sumarizam as principais estatísticas descritivas (mínimo, quartis, média, máximo, variância e desvio padrão) calculadas a partir das médias mensais de PM2.5 para cada fonte de dados, segmentadas por ano.
+
+```{r tabela-resumo, echo=FALSE, message=FALSE, warning=FALSE}
+library(knitr)
+
+sumario_cams2022 <- dadosCamsMensal %>% filter(ano == "2022") |> 
+  summarise(
+    Fonte = "PM2.5 (µg/m³) – 2022",
+    Min = min(pm2.5Mensal),
+    P25 = quantile(pm2.5Mensal, 0.25),
+    P50 = median(pm2.5Mensal),
+    Méd = mean(pm2.5Mensal),
+    P75 = quantile(pm2.5Mensal, 0.75),
+    Max = max(pm2.5Mensal),
+    var = var(pm2.5Mensal),
+    sd = sd(pm2.5Mensal)
+  )
+
+sumario_cams2023 <- dadosCamsMensal %>% filter(ano == "2023") |> 
+  summarise(
+    Fonte = "PM2.5 (µg/m³) – 2023",
+    Min = min(pm2.5Mensal),
+    P25 = quantile(pm2.5Mensal, 0.25),
+    P50 = median(pm2.5Mensal),
+    Méd = mean(pm2.5Mensal),
+    P75 = quantile(pm2.5Mensal, 0.75),
+    Max = max(pm2.5Mensal),
+    var = var(pm2.5Mensal),
+    sd = sd(pm2.5Mensal)
+  )
+
+sumario_don2022 <- dadosDon %>% filter(Ano == "2022") |> 
+  summarise(
+    Fonte = "PM2.5 (µg/m³) – 2022",
+    Min = min(Media_PM25),
+    P25 = quantile(Media_PM25, 0.25),
+    P50 = median(Media_PM25),
+    Méd = mean(Media_PM25),
+    P75 = quantile(Media_PM25, 0.75),
+    Max = max(Media_PM25),
+    var = var(Media_PM25),
+    sd = sd(Media_PM25)
+  )
+
+sumario_don2023 <- dadosDon %>% filter(Ano == "2023") |> 
+  summarise(
+    Fonte = "PM2.5 (µg/m³) – 2023",
+    Min = min(Media_PM25),
+    P25 = quantile(Media_PM25, 0.25),
+    P50 = median(Media_PM25),
+    Méd = mean(Media_PM25),
+    P75 = quantile(Media_PM25, 0.75),
+    Max = max(Media_PM25),
+    var = var(Media_PM25),
+    sd = sd(Media_PM25)
+  )
+
+tabela_final1 <- bind_rows(sumario_cams2022, sumario_cams2023)
+
+tabela_final2 <- bind_rows(sumario_don2022,sumario_don2023)
+
+kable(
+  tabela_final1,
+  caption = "Estatísticas descritivas - CAMS ",
+  col.names = c("", "Min", "P25", "P50", "Méd", "P75", "Max", "var", "sd"),
+  digits = 1,
+  align = 'lrrrrrrrr'
+)
+
+kable(
+  tabela_final2,
+  caption = "Estatísticas descritivas - Donkelar",
+  col.names = c("", "Min", "P25", "P50", "Méd", "P75", "Max", "var", "sd"),
+  digits = 1,
+  align = 'lrrrrrrrr'
+)
+
+```
+
+## 5. Análise do grau de associação entre as fontes
+
+Nesta seção, as medições mensais de ambas as fontes são comparadas diretamente para avaliar o grau de associação e concordância entre elas.
+
+```{r}
+full <- inner_join(
+  dadosDon,
+  dadosCamsMensal,
+  by = join_by(CD_MUN == Cod, Ano == ano, Mes == month)) |> 
+  rename(PM_DONKELAR = Media_PM25,
+         PM_CAMS = pm2.5Mensal)
+```
+
+### 5.1 Gráfico de Dispersão
+O gráfico de dispersão permite uma análise empírica visual da associação entre as duas fontes.
+
+```{r}
+ggplot(full, aes(x = PM_DONKELAR, 
+                 y = PM_CAMS)) +
+  geom_point(alpha = 0.5) +
+  labs(
+    x = "PM2.5 Donkelar (µg/m³)",
+    y = "PM2.5 CAMS (µg/m³)"
+  ) +
+  theme_classic()
+```
+
+Para avaliar a significância desta associação, aplicou-se o teste de correlação de Spearman, obtendo-se $p < 0.01$ e 
+$\hat{\rho} = 0.225$, o que revela uma associação positiva
+significativa.
+
+### 5.2 Gráfico de Bland-Altman
+Para uma análise mais robusta da concordância foi empregado o método gráfico de Bland-Altman.
+
+```{r}
+full_analise <- full %>%
+  mutate(
+    media     = (PM_DONKELAR + PM_CAMS) / 2,
+    diferenca = PM_CAMS - PM_DONKELAR
+  )
+
+vies_medio <- mean(full_analise$diferenca)
+sd_diferenca <- sd(full_analise$diferenca)
+limite_superior <- vies_medio + 1.96 * sd_diferenca
+limite_inferior <- vies_medio - 1.96 * sd_diferenca
+
+bland <- ggplot(full_analise, aes(x = media, y = diferenca)) +
+  geom_point(alpha = 0.5) +
+  
+  geom_hline(yintercept = vies_medio, color = "blue", linetype = "solid", linewidth = 1) +
+  
+  geom_hline(yintercept = limite_superior, color = "red", linetype = "dashed") +
+  
+  geom_hline(yintercept = limite_inferior, color = "red", linetype = "dashed") +
+  
+  labs(
+    x = "Média das Medições",
+    y = "CAMS - Donkelar"
+  ) +
+  theme_classic()
+
+  ggplotly(bland)
+```
+
+No gráfico, é possível notar um padrão de funil (heterocedasticidade), indicando que a variabilidade da diferença entre as medições aumenta conforme a média das medições (magnitude do PM2.5) se eleva. Em outras palavras, as fontes tornam-se mais discrepantes em níveis de poluição mais altos.
+
+### 5.3 Análise do Viés Médio
+
+Para analisar o viés médio entre as duas fontes, calculamos o intervalo de 95% confiança para a diferença de médias ($\mu_{CAMS} - \mu_{Donkelar}$) entre as duas fontes de medição ao longo dois dois anos.
+
+```{r}
+resultado_teste_t <- t.test(full_analise$diferenca, mu = 0)
+
+media_diferenca <- resultado_teste_t$estimate
+ic_inferior <- resultado_teste_t$conf.int[1]
+ic_superior <- resultado_teste_t$conf.int[2]
+```
+
+O viés médio observado na amostra foi de `r round(media_diferenca, 3)` µg/m³.
+
+O Intervalo de Confiança de 95% para esta média é: $IC \ 95\% = [$ `r round(ic_inferior, 3)` µg/m³ ; `r round(ic_superior, 3)` µg/m³$]$
+
+Como o valor zero não está incluído neste intervalo (ambos os limites são positivos), temos forte evidência estatística de que existe um viés sistemático. Conclui-se que as medições do CAMS são, em média, significativamente superiores às do Donkelar quando analisadas de forma pareada mensalmente.
+
+## 6. Análise temporal
+A seguir, é analisada a tendência temporal das médias mensais agregadas de PM2.5 para todo o estado de Pernambuco, comparando as duas fontes.
+
+```{r}
+dados_media_agregada <- full %>%
+  mutate(
+    Mes_str = sprintf("%02d", Mes),
+    Data_str = paste0(Ano, "-", Mes_str, "-01"),
+    Data = as.Date(Data_str)
+  ) %>%
+  group_by(Data, Ano) %>% 
+  summarise(
+    Media_CAMS = mean(PM_CAMS, na.rm = TRUE),
+    Media_DONKELAR = mean(PM_DONKELAR, na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  arrange(Data)
+
+dados_media_long <- dados_media_agregada %>%
+  pivot_longer(
+    cols = c("Media_CAMS", "Media_DONKELAR"),
+    names_to = "Fonte",
+    values_to = "PM25_Media"
+  ) %>%
+  mutate(Fonte = ifelse(Fonte == "Media_CAMS", "CAMS", "Donkelar"))
+
+serie_global <- ggplot(dados_media_long, 
+                       aes(x = Data, y = PM25_Media, 
+                           color = Fonte, group = Fonte)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2.5, alpha = 0.8) +
+  labs(
+    x = " ",
+    y = "PM2.5 Médio (µg/m³)",
+    color = "Fonte de Dados"
+  ) +
+  theme_classic() 
+
+ggplotly(serie_global)
+```
+
+Observa-se, nesta análise agregada, um padrão temporal distinto entre os anos. Durante a maior parte de 2022, a média estadual mensal estimada pelo CAMS foi superior à do Donkelar. Em 2023, entretanto, essa relação se inverteu.
+
+## 7. Análise espaço-temporal
+
+Por fim, a análise temporal é combinada com a dimensão espacial, por meio do agrupamento dos municípios por Mesorregião de Pernambuco, visando observar a existência de padrões regionais distintos.
+
+```{r}
+mesos_geom <- read_meso_region(code_meso = "PE", 
+                               year = 2020) %>%
+  select(name_meso)
+
+munis_com_meso <- st_join(st_centroid(municipios_pe), mesos_geom, join = st_intersects)
+
+mapa_regioes <- munis_com_meso %>%
+  st_drop_geometry() %>% 
+  rename(Mesorregiao = name_meso) %>%
+  mutate(
+    code_muni_num = as.numeric(code_muni)
+  ) %>%
+  select(code_muni_num, Mesorregiao) %>%
+  distinct()
+
+full_com_regiao <- left_join(
+  full, 
+  mapa_regioes, 
+  by = c("CD_MUN" = "code_muni_num")
+)
+
+full_com_regiao_filtrado <- full_com_regiao %>%
+  filter(!is.na(Mesorregiao))
+
+dados_media_regional <- full_com_regiao_filtrado %>%
+  mutate(
+    Mes_str = sprintf("%02d", Mes),
+    Data_str = paste0(Ano, "-", Mes_str, "-01"),
+    Data = as.Date(Data_str)
+  ) %>%
+  
+  group_by(Mesorregiao, Data, Ano) %>%
+  summarise(
+    Media_CAMS = mean(PM_CAMS, na.rm = TRUE),
+    Media_DONKELAR = mean(PM_DONKELAR, na.rm = TRUE),
+    .groups = 'drop' 
+  ) %>%
+  arrange(Mesorregiao, Data)
+
+dados_media_regional_long <- dados_media_regional %>%
+  pivot_longer(
+    cols = c("Media_CAMS", "Media_DONKELAR"),
+    names_to = "Fonte",
+    values_to = "PM25_Media"
+  ) %>%
+  mutate(Fonte = ifelse(Fonte == "Media_CAMS", "CAMS", "Donkelar"))
+```
+
+### 7.1 Análise por Mesorregião
+
+```{r}
+serie3 <- dados_media_regional_long |> 
+  ggplot(aes(x = Data, y = PM25_Media, color = Fonte, group = Fonte)) +
+  geom_line(linewidth = 0.8) +
+  geom_point(alpha = 0.7) +
+  facet_wrap(~ Mesorregiao, scales = "free_y", ncol = 2) +
+  labs(
+    x = "Mês",
+    y = "PM2.5 Médio (µg/m³)",
+    color = "Fonte de Dados"
+  ) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1), 
+    strip.text = element_text(margin = margin(b = 10)), 
+    panel.spacing = unit(1.5, "lines"))
+
+ggplotly(serie3)
+```
+
+A análise desagregada por mesorregião revela padrões temporais mais complexos e distintos daqueles observados na análise global (agregada para o estado). Destaca-se que em nenhuma mesorregião as séries temporais das duas fontes apresentam concordância plena, reforçando a existência de um viés sistemático e, possivelmente, espacialmente variável.
+
+## Referências {-} 
+
+Bland, J. M., & Altman, D. G. (1986). Statistical methods for assessing agreement between two methods of clinical measurement. *The Lancet*, *327*(8476), 307-310.
+
+Kloke, J., & McKean, J. W. (2014). *Nonparametric Statistical Methods Using R*. CRC Press.
+

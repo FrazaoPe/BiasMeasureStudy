@@ -1,0 +1,744 @@
+---
+title: "PM 2.5 Pernambuco's Dashboard"
+runtime: shiny
+output:
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: scroll
+    theme: 
+      version: 4
+      bootswatch: lumen
+---
+
+```{r global, include=FALSE}
+library(flexdashboard)
+library(shinydashboard)
+library(tidyverse)
+library(shiny)
+library(scales)
+library(lubridate)
+library(DT)
+library(readxl)
+library(geobr)
+library(sf)
+library(tmap)
+library(plotly)
+library(distill)
+
+dadosCamsMensal <- read.csv("BaseCamsMensal.csv")
+dadosCamsAnual <- read.csv("BaseCamsAnual.csv")
+dadosDon <- read.csv2("BaseDonkelar.csv")
+dadosDonAnual <- read.csv2("BaseDonkelarAnual.csv")
+
+dadosCamsAnual <- dadosCamsAnual |> mutate(ano = as.character(ano))
+dadosDonAnual <- dadosDonAnual |> mutate(Ano = as.character(Ano))
+
+dadosCamsMensal <- dadosCamsMensal |>
+select(Cod, Ano = ano, Mes = month, PM_CAMS = pm2.5Mensal) |>
+mutate(Cod = as.numeric(Cod))
+
+dadosDonMensal <- dadosDon |>
+select(CD_MUN, Ano, Mes, PM_DONKELAR = Media_PM25) |>
+mutate(CD_MUN = as.numeric(CD_MUN))
+
+full <- inner_join(
+dadosCamsMensal,
+dadosDonMensal,
+by = c("Cod" = "CD_MUN", "Ano", "Mes")
+) |>
+rename(CD_MUN = Cod)
+
+municipios_pe_nomes <- read_municipality(code_muni = "PE", year = 2024) |>
+select(code_muni, name_muni) |>
+mutate(code_muni = as.numeric(code_muni))
+
+full <- full |>
+  left_join(
+    municipios_pe_nomes, 
+    by = c("CD_MUN" = "code_muni")
+  ) |>
+  rename(NM_MUN = name_muni) |>
+  filter(!is.na(NM_MUN)) 
+
+anos_disponiveis <- sort(unique(dadosCamsAnual$ano))
+
+municipios_disponiveis <- full |>
+distinct(NM_MUN) |> 
+pull(NM_MUN) |>
+sort()
+
+tmap_mode(mode = "view")
+```
+
+Análise espacial {data-orientation=rows}
+===
+
+Inputs {.sidebar}
+---
+
+```{r}
+selectInput(
+  inputId = "ano",
+  label = "Ano",
+  choices = anos_disponiveis, # Opções: "2022", "2023", etc.
+  selected = max(anos_disponiveis)
+)
+```
+
+## Section 1 
+### CAMS {data-height=700,data-width=1000}
+
+```{r}
+renderTmap({
+  req(input$ano) # Requisita que um ano seja selecionado
+  # 1. Obter a malha municipal
+  municipios_pe <- read_municipality(code_muni = "PE", year = 2024) |>
+    mutate(Cod = as.character(code_muni))
+  # 2. Filtrar dados do CAMS pelo ano selecionado
+  dadosCamsFiltrados <- dadosCamsAnual |>
+    filter(ano == input$ano) |>
+    mutate(Cod = as.character(Cod))
+  # 3. Join e limpeza
+  PE_Cams_Mapa <- left_join(municipios_pe, dadosCamsFiltrados, by = "Cod") |>
+    filter(is.finite(PM25_Anual))
+  # 4. Gerar o mapa interativo
+  tm_shape(PE_Cams_Mapa) +
+    tm_fill(
+      "PM25_Anual",
+      title = "PM2.5 (µg/m³)",
+      palette = c("#0048ff", "#808080", "#660708"),
+      style = "fixed",
+      breaks = c(0, 10, 20, 30),
+      labels = c("Bom (0–10]", "Ruim (10–20]", "Péssimo (20–30]"),
+      alpha = 0.7,
+      showNA = FALSE,
+      popup.vars = c(
+        "Município" = "name_muni",
+        "Média Anual PM2.5" = "PM25_Anual"
+      ),
+      popup.format = list(PM25_Anual = list(digits = 2)),
+      id = "name_muni"
+    ) +
+    tm_borders(alpha = 0.6) +
+    tm_layout(
+      main.title = "Média Anual de PM2.5" ,
+      main.title.position = "center",
+      title = paste("Fonte: CAMS (", input$ano, ")"),
+      title.size = 0.6,
+      title.position = c("center", "bottom"),
+      legend.title.size = 0.5,
+      legend.text.size = 0.5
+    )
+})
+```
+
+## Section 2
+### Donkelar {data-height=700,data-width=1000}
+
+```{r}
+renderTmap({
+  req(input$ano) # Requisita que um ano seja selecionado
+
+  # 1. Obter a malha municipal
+  municipios_pe <- read_municipality(code_muni = "PE", year = 2024) |>
+    mutate(CD_MUN = as.character(code_muni))
+
+  # 2. Filtrar dados do Donkelar pelo ano selecionado
+  dadosDonFiltrados <- dadosDonAnual |>
+    filter(Ano == input$ano) |>
+    mutate(CD_MUN = as.character(CD_MUN))
+
+  # 3. Join e limpeza
+  Mapa_Don_PE <- left_join(municipios_pe, dadosDonFiltrados, by = "CD_MUN") |>
+    filter(is.finite(PM25_Anual))
+
+  # 4. Gerar o mapa interativo
+  tm_shape(Mapa_Don_PE) +
+    tm_fill(
+      "PM25_Anual",
+      title = "PM2.5 (µg/m³)",
+      n = 5,
+      palette = c("#0048ff", "#808080", "#660708"),
+      style = "fixed",
+      breaks = c(0, 10, 20, 30),
+      labels = c("Bom (0–10]", "Ruim (10–20]", "Péssimo (20–30]"),
+      alpha = 0.7,
+      showNA = FALSE,
+      popup.vars = c(
+        "Município" = "name_muni",
+        "Média Anual PM2.5" = "PM25_Anual"
+      ),
+      popup.format = list(PM25_Anual = list(digits = 2)),
+      id = "name_muni"
+    ) +
+    tm_borders(alpha = 0.6) +
+    tm_layout(
+      main.title = "Média Anual de PM2.5",
+      main.title.position = "center",
+      title = paste("Fonte: Donkelar (", input$ano, ")"),
+      title.size = 0.8,
+      title.position = c('center', 'bottom')
+    )
+})
+```
+
+## Section 3
+### Mapa das diferenças {data-height=700,data-width=1000}
+
+```{r}
+renderTmap({
+  req(input$ano) # Requisita que um ano seja selecionado
+  # 1. Preparar os dados para a diferença (CAMS - Donkelar)
+  dados_cams <- dadosCamsAnual |>
+    select(Cod, PM25_CAMS = PM25_Anual, ano) |>
+    mutate(Cod = as.character(Cod))
+  dados_don <- dadosDonAnual |>
+    select(CD_MUN, PM25_Don = PM25_Anual, Ano) |>
+    mutate(CD_MUN = as.character(CD_MUN))
+  # 2. Calcular a diferença para o ano selecionado
+  dados_diferenca_filtrados <- inner_join(
+    dados_cams,
+    dados_don,
+    by = c("Cod" = "CD_MUN", "ano" = "Ano")
+  ) |>
+    filter(ano == input$ano) |>
+    mutate(Diferenca_PM25 = PM25_CAMS - PM25_Don)
+  # 3. Obter a malha municipal
+  municipios_pe <- read_municipality(code_muni = "PE", year = 2024) |>
+    mutate(Cod = as.character(code_muni))
+  # 4. Join com a malha
+  PE_Diferencas <- municipios_pe |>
+    left_join(dados_diferenca_filtrados, by = "Cod") |>
+    filter(!is.na(Diferenca_PM25))
+  # 5. Variáveis de estilo para a diferença
+  breaks_4_cat <- c(-8, -4, 0, 4, 8)
+  labels_4_cat <- c("-8 a -4", "-4 a 0", "0 a 4", "4 a 8")
+  # 6. Gerar o mapa interativo
+  tm_shape(PE_Diferencas) +
+    tm_fill(
+      "Diferenca_PM25",
+      title = "Diferença PM2.5 (µg/m³)",
+      palette = "BrBG", # Paleta divergente para diferença
+      style = "fixed",
+      breaks = breaks_4_cat,
+      labels = labels_4_cat,
+      alpha = 0.8,
+      showNA = FALSE,
+      popup.vars = c(
+        "Município" = "name_muni",
+        "PM2.5 CAMS" = "PM25_CAMS",
+        "PM2.5 Donkelar" = "PM25_Don",
+        "Diferença (CAMS - Donkelar)" = "Diferenca_PM25"
+      ),
+      popup.format = list(
+        PM25_CAMS = list(digits = 2),
+        PM25_Don = list(digits = 2),
+        Diferenca_PM25 = list(digits = 2)
+      ),
+      id = "name_muni"
+    ) +
+    tm_borders(alpha = 0.5) +
+    tm_layout(
+      main.title = paste("Diferença entre Médias Anuais de PM2.5 (CAMS - Donkelar) em", input$ano),
+      main.title.position = "center"
+    )
+})
+```
+
+Análise temporal {data-orientation=rows}
+===
+
+Inputs {.sidebar}
+---
+
+```{r}
+selectInput(
+    inputId = "ano",
+    label = "Ano/Período",
+    choices = c("Período Total", anos_disponiveis),
+    selected = "Período Total"
+)
+
+selectInput(
+    inputId = "municipio",
+    label = "Município",
+    choices = municipios_disponiveis,
+    selected = "Recife"
+)
+```
+
+## Análise temporal {.tabset} 
+
+### Série do município {data-height=700,data-width=1000}
+
+```{r}
+renderPlotly({
+    req(input$ano, input$municipio)
+    
+    dados_filtrados_muni <- full %>%
+        filter(NM_MUN == input$municipio)
+
+    if (input$ano == "Período Total") {
+        # Série Completa
+        dados_finais <- dados_filtrados_muni
+        titulo_sufixo <- "para todo o Período Disponível"
+        data_breaks <- "3 months"
+        data_labels <- "%Y-%m"
+    } else {
+        # Ano Específico
+        dados_finais <- dados_filtrados_muni %>%
+            filter(Ano == as.numeric(input$ano))
+        titulo_sufixo <- paste("em", input$ano)
+        data_breaks <- "1 month"
+        data_labels <- "%b"
+    }
+    
+    # --- CÁLCULO DA SÉRIE MUNICIPAL ---
+    dados_media_agregada <- dados_finais %>%
+        mutate(
+            Mes_str = sprintf("%02d", Mes),
+            Data_str = paste0(Ano, "-", Mes_str, "-01"),
+            Data = as.Date(Data_str)
+        ) %>%
+        group_by(Data) %>%
+        summarise(
+            Media_CAMS = mean(PM_CAMS, na.rm = TRUE),
+            Media_DONKELAR = mean(PM_DONKELAR, na.rm = TRUE),
+            .groups = 'drop'
+        ) %>%
+        arrange(Data)
+
+    dados_media_long <- dados_media_agregada %>%
+        pivot_longer(
+            cols = c("Media_CAMS", "Media_DONKELAR"),
+            names_to = "Fonte",
+            values_to = "PM25_Media"
+        ) %>%
+        mutate(Fonte = ifelse(Fonte == "Media_CAMS", "CAMS", "Donkelar"))
+
+    # --- GRÁFICO ---
+    serie_municipal <- ggplot(dados_media_long,
+        aes(x = Data, y = PM25_Media,
+            color = Fonte, group = Fonte)) +
+        geom_line(linewidth = 1) +
+        geom_point(size = 2.5, alpha = 0.8) +
+        labs(
+            title = paste("Média Mensal de PM2.5 para", input$municipio, titulo_sufixo),
+            x = "Data",
+            y = "PM2.5 Médio (µg/m³)",
+            color = "Fonte de Dados"
+        ) +
+        scale_x_date(date_breaks = data_breaks, date_labels = data_labels) +
+        theme_minimal() +
+        theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+axis.text.x = element_text(size = 13), 
+axis.text.y = element_text(size = 13),
+axis.title.x = element_text(size = 14), # Título do eixo X
+axis.title.y = element_text(size = 14)
+)
+
+    ggplotly(serie_municipal, height = 650) %>%
+        config(displayModeBar = FALSE)
+})
+```
+
+### Série estadual {data-height=700,data-width=1000}
+
+```{r}
+renderPlotly({
+    req(input$ano)
+
+    # --- LÓGICA DE FILTRAGEM ---
+    if (input$ano == "Período Total") {
+        dados_filtrados <- full
+        titulo_sufixo <- "para todo o Período Disponível"
+        data_breaks <- "3 months"
+        data_labels <- "%Y-%m" # Ano-Mês
+    } else {
+        # Ano Específico
+        dados_filtrados <- full %>%
+            filter(Ano == as.numeric(input$ano))
+        titulo_sufixo <- paste("em", input$ano)
+        data_breaks <- "1 month"
+        data_labels <- "%b" # Mês abreviado
+    }
+
+    # --- CÁLCULO DA SÉRIE GLOBAL ---
+    dados_media_agregada <- dados_filtrados %>%
+        mutate(
+            Mes_str = sprintf("%02d", Mes),
+            Data_str = paste0(Ano, "-", Mes_str, "-01"),
+            Data = as.Date(Data_str)
+        ) %>%
+        group_by(Data, Ano) %>%
+        summarise(
+            Media_CAMS = mean(PM_CAMS, na.rm = TRUE),
+            Media_DONKELAR = mean(PM_DONKELAR, na.rm = TRUE),
+            .groups = 'drop'
+        ) %>%
+        arrange(Data)
+
+    dados_media_long <- dados_media_agregada %>%
+        pivot_longer(
+            cols = c("Media_CAMS", "Media_DONKELAR"),
+            names_to = "Fonte",
+            values_to = "PM25_Media"
+        ) %>%
+        mutate(Fonte = ifelse(Fonte == "Media_CAMS", "CAMS", "Donkelar"))
+
+    # --- GRÁFICO ---
+    serie_global <- ggplot(dados_media_long,
+        aes(x = Data, y = PM25_Media,
+            color = Fonte, group = Fonte)) +
+        geom_line(linewidth = 1) +
+        geom_point(size = 2.5, alpha = 0.8) +
+        labs(
+            title = paste("Média Mensal de PM2.5 Agregada Estadual", titulo_sufixo),
+            x = "Data",
+            y = "PM2.5 Médio (µg/m³)",
+            color = "Fonte de Dados"
+        ) +
+        scale_x_date(date_breaks = data_breaks, date_labels = data_labels) +
+        theme_minimal() +
+        theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+              axis.text.x = element_text(size = 13), 
+axis.text.y = element_text(size = 13),
+axis.title.x = element_text(size = 14), # Título do eixo X
+axis.title.y = element_text(size = 14))
+
+    ggplotly(serie_global, height = 650) %>%
+        config(displayModeBar = FALSE)
+})
+```
+
+### Série por Mesorregião {data-height=700,data-width=1000}
+
+```{r}
+renderPlotly({
+    req(input$ano)
+
+    mesos_geom <- read_meso_region(code_meso = "PE", year = 2020) %>%
+        select(name_meso)
+
+    municipios_pe_sf <- read_municipality(code_muni = "PE", year = 2024)
+    munis_com_meso <- st_join(st_centroid(municipios_pe_sf), mesos_geom, join = st_intersects)
+
+    mapa_regioes <- munis_com_meso %>%
+        st_drop_geometry() %>%
+        rename(Mesorregiao = name_meso) %>%
+        mutate(code_muni_num = as.numeric(code_muni)) %>%
+        select(code_muni_num, Mesorregiao) %>%
+        distinct()
+
+    full_com_regiao <- left_join(
+        full,
+        mapa_regioes,
+        by = c("CD_MUN" = "code_muni_num")
+    )
+
+    full_com_regiao_filtrado_base <- full_com_regiao %>%
+        filter(!is.na(Mesorregiao))
+
+    if (input$ano == "Período Total") {
+        full_com_regiao_filtrado <- full_com_regiao_filtrado_base
+        titulo_sufixo <- "para todo o Período Disponível"
+        data_breaks <- "3 months"
+        data_labels <- "%Y-%m"
+    } else {
+        # Ano Específico
+        full_com_regiao_filtrado <- full_com_regiao_filtrado_base %>%
+            filter(Ano == as.numeric(input$ano))
+        titulo_sufixo <- paste("em", input$ano)
+        data_breaks <- "1 month"
+        data_labels <- "%b"
+    }
+
+    dados_media_regional_long <- full_com_regiao_filtrado %>%
+        mutate(
+            Mes_str = sprintf("%02d", Mes),
+            Data_str = paste0(Ano, "-", Mes_str, "-01"),
+            Data = as.Date(Data_str)
+        ) %>%
+        group_by(Mesorregiao, Data, Ano) %>%
+        summarise(
+            Media_CAMS = mean(PM_CAMS, na.rm = TRUE),
+            Media_DONKELAR = mean(PM_DONKELAR, na.rm = TRUE),
+            .groups = 'drop'
+        ) %>%
+        pivot_longer(
+            cols = c("Media_CAMS", "Media_DONKELAR"),
+            names_to = "Fonte",
+            values_to = "PM25_Media"
+        ) %>%
+        mutate(Fonte = ifelse(Fonte == "Media_CAMS", "CAMS", "Donkelar"))
+
+    serie_regional_plot <- dados_media_regional_long |>
+        ggplot(aes(x = Data, y = PM25_Media, color = Fonte, group = Fonte)) +
+        geom_line(linewidth = 0.8) +
+        geom_point(alpha = 0.7) +
+        facet_wrap(~ Mesorregiao, scales = "free_y", ncol = 2) +
+        labs(
+            title = paste("Comparação Mensal de PM2.5 por Mesorregião", titulo_sufixo),
+            x = "Data",
+            y = "PM2.5 Médio (µg/m³)",
+            color = "Fonte de Dados"
+        ) +
+        scale_x_date(date_breaks = data_breaks, date_labels = data_labels) +
+        theme_minimal() +
+        theme(
+            plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+strip.text = element_text(margin = margin(b = 5, t = 5), face = "bold"),
+panel.spacing = unit(1.5, "lines"),
+axis.text.x = element_text(size = 13, angle = 45), 
+axis.text.y = element_text(size = 13),
+axis.title.x = element_text(size = 14),
+axis.title.y = element_text(size = 14))
+    
+    ggplotly(serie_regional_plot, height = 650) %>% config(displayModeBar = FALSE)
+})
+```
+
+Análise Sazonal {data-orientation=rows}
+===
+
+Inputs {.sidebar}
+---
+
+```{r}
+# 1. Filtro de Seleção da Fonte
+selectInput(
+ inputId = "fonte_sazonal",
+ label = "Fonte de Dados",
+ choices = c("CAMS", "Donkelar"),
+ selected = "CAMS"
+)
+
+# 2. Filtro de Seleção do Ano
+selectInput(
+ inputId = "ano",
+ label = "Ano",
+ choices = anos_disponiveis,
+ selected = max(anos_disponiveis)
+)
+```
+
+## Análise sazonal {.tabset}
+### Distribuição mensal {data-height=700,data-width=1200}
+
+```{r}
+renderPlotly({
+ req(input$ano, input$fonte_sazonal)
+
+ # Define a fonte e as colunas baseadas na seleção do usuário
+ fonte_selecionada <- input$fonte_sazonal
+
+ if (fonte_selecionada == "CAMS") {
+ dados_filtrados <- dadosCamsMensal |>
+ filter(Ano == as.numeric(input$ano)) |>
+ rename(PM = PM_CAMS)
+ y_max <- 24
+ cor_box <- "#0d3b66"
+ } else { # Donkelar
+ dados_filtrados <- dadosDonMensal |>
+ filter(Ano == as.numeric(input$ano)) |>
+ rename(PM = PM_DONKELAR)
+ y_max <- 15
+ cor_box <- "#3f1b4a" # Cor diferente para Donkelar
+ }
+
+ # Verificação de Dados
+ if (nrow(dados_filtrados) == 0) {
+ return(
+ ggplotly(
+ ggplot() +
+ labs(title = paste("Dados", fonte_selecionada, "indisponíveis no ano", input$ano)) +
+ theme_minimal()
+ ) %>% config(displayModeBar = FALSE)
+ )
+ }
+
+ # Criação do gráfico
+ plot_sazonal <- dados_filtrados |>
+ ggplot(aes(x = Mes, y = PM, group = Mes)) +
+ geom_violin(alpha = 0.5, trim = FALSE, fill = "#faf0ca") +
+ geom_boxplot(width = 0.15, fill = cor_box, alpha = 0.7) +
+ labs(
+ title = paste("Distribuição Mensal de PM2.5 (", fonte_selecionada, ") em", input$ano),
+ x = "Mês",
+ y = "PM2.5 (µg/m³)",
+ caption = paste("Fonte:", fonte_selecionada, "(Agregado Estadual)")
+ ) +
+ scale_x_continuous(breaks = seq(1, 12, by = 1)) +
+ scale_y_continuous(limits = c(0, y_max)) +
+ theme_classic() +
+ theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+       axis.text.x = element_text(size = 13), 
+axis.text.y = element_text(size = 13),
+axis.title.x = element_text(size = 14), # Título do eixo X
+axis.title.y = element_text(size = 14))
+ ggplotly(plot_sazonal) %>% config(displayModeBar = FALSE)
+})
+```
+
+### Medidas-resumo
+
+```{r}
+renderDT({
+ req(input$ano, input$fonte_sazonal)
+
+ fonte_selecionada <- input$fonte_sazonal
+
+ if (fonte_selecionada == "CAMS") {
+  dados_resumo <- dadosCamsMensal |>
+ filter(Ano == as.numeric(input$ano)) |>
+ rename(PM = PM_CAMS)
+ } else { # Donkelar
+ dados_resumo <- dadosDonMensal |>
+ filter(Ano == as.numeric(input$ano)) |>
+ rename(PM = PM_DONKELAR)
+ }
+
+ # 1. Calcular estatísticas descritivas
+ sumario_final <- dados_resumo |>
+ summarise(
+ Fonte = fonte_selecionada,
+ Min = min(PM, na.rm = TRUE),
+ P25 = quantile(PM, 0.25, na.rm = TRUE),
+ P50 = median(PM, na.rm = TRUE),
+ Méd = mean(PM, na.rm = TRUE),
+ P75 = quantile(PM, 0.75, na.rm = TRUE),
+ Max = max(PM, na.rm = TRUE),
+ Var = var(PM, na.rm = TRUE),
+ SD = sd(PM, na.rm = TRUE)
+ ) |>
+ # Formatando números para uma casa decimal
+ mutate(across(where(is.numeric), ~ round(., 1)))
+
+ datatable(
+ sumario_final,
+ caption = paste('Estatísticas Descritivas (PM2.5 µg/m³) -', fonte_selecionada, 'Agregado Estadual em', input$ano),
+ options = list(
+ paging = FALSE,
+ searching = FALSE,
+ dom = 't'
+ )
+ )
+})
+```
+
+Análise de Concordância {data-orientation=rows}
+===
+
+Inputs {.sidebar}
+---
+
+```{r}
+# Manter apenas o filtro Ano
+selectInput(
+inputId = "ano",
+label = "Ano",
+choices = anos_disponiveis,
+selected = max(anos_disponiveis)
+)
+# O filtro de município foi removido desta aba.
+```
+
+## Análise de concordância {.tabset}
+### Gráfico de dispersão  {data-height=700,data-width=1200}
+
+```{r}
+renderPlotly({
+  req(input$ano)
+
+  # 1. Filtrar dados (usa o objeto 'full' criado no bloco global), apenas por Ano
+  dados_filtrados <- full |>
+    filter(Ano == as.numeric(input$ano))
+
+  # Verificação de Dados
+  if (nrow(dados_filtrados) == 0) {
+    return(
+      ggplotly(
+        ggplot() +
+        labs(title = paste("Dados estaduais indisponíveis para concordância em", input$ano)) +
+        theme_minimal()
+      ) %>% config(displayModeBar = FALSE)
+    )
+  }
+
+  # 2. Gráfico de Dispersão (Estadual)
+  dispersao <- ggplot(dados_filtrados, aes(x = PM_DONKELAR, y = PM_CAMS)) +
+    geom_point(alpha = 0.4, color = "#0d3b66") +
+    geom_smooth(method = "lm", color = "red", se = FALSE) +
+    labs(
+      title = paste("Dispersão PM2.5 (CAMS vs. Donkelar) Estadual em", input$ano),
+      x = "PM2.5 Donkelar (µg/m³)",
+      y = "PM2.5 CAMS (µg/m³)"
+    ) +
+    theme_classic() +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+          axis.text.x = element_text(size = 13), 
+axis.text.y = element_text(size = 13),
+axis.title.x = element_text(size = 14), # Título do eixo X
+axis.title.y = element_text(size = 14))
+
+  ggplotly(dispersao) %>% config(displayModeBar = FALSE)
+})
+```
+
+### Bland-Altman {data-height=700,data-width=1200}
+
+```{r}
+renderPlotly({
+  req(input$ano)
+
+  # 1. Filtrar dados, calcular Média/Diferença (Estadual por Ano)
+  full_analise_filtrado <- full |>
+    filter(Ano == as.numeric(input$ano)) |>
+    mutate(
+      media     = (PM_DONKELAR + PM_CAMS) / 2,
+      diferenca = PM_CAMS - PM_DONKELAR
+    )
+
+  # Verificação de Dados
+  if (nrow(full_analise_filtrado) < 2) {
+    return(
+      ggplotly(
+        ggplot() +
+        labs(title = "Dados insuficientes para Bland-Altman.") +
+        theme_minimal()
+      ) %>% config(displayModeBar = FALSE)
+    )
+  }
+
+  # 2. Calcular Limites (Viés Médio e Limites de Concordância)
+  vies_medio <- mean(full_analise_filtrado$diferenca, na.rm = TRUE)
+  sd_diferenca <- sd(full_analise_filtrado$diferenca, na.rm = TRUE)
+  limite_superior <- vies_medio + 1.96 * sd_diferenca
+  limite_inferior <- vies_medio - 1.96 * sd_diferenca
+
+  # 3. Criar Gráfico
+  bland <- ggplot(full_analise_filtrado, aes(x = media, y = diferenca)) +
+    geom_point(alpha = 0.3, color = "#0d3b66") +
+
+    geom_hline(yintercept = vies_medio, color = "blue", linetype = "solid", linewidth = 1) +
+
+    geom_hline(yintercept = limite_superior, color = "red", linetype = "dashed") +
+
+    geom_hline(yintercept = limite_inferior, color = "red", linetype = "dashed") +
+
+    labs(
+      title = paste("Bland-Altman (CAMS - Donkelar) Estadual em", input$ano),
+      subtitle = paste0("Viés: ", round(vies_medio, 2), " µg/m³ | LoA: ±", round(1.96 * sd_diferenca, 2), " µg/m³"),
+      x = "Média das Medições (µg/m³)",
+      y = "Diferença (CAMS - Donkelar) (µg/m³)"
+    ) +
+    theme_classic() +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+          axis.text.x = element_text(size = 13), 
+axis.text.y = element_text(size = 13),
+axis.title.x = element_text(size = 14), # Título do eixo X
+axis.title.y = element_text(size = 14))
+
+  ggplotly(bland) %>% config(displayModeBar = FALSE)
+})
+```
